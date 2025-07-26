@@ -1,44 +1,50 @@
-"use client";
-import { useEffect, useRef } from "react";
-import { useOrderbookStore } from "../store/orderbook";
+'use client';
 
-export const useOrderbook = () => {
-  const updateOrderbook = useOrderbookStore((s) => s.updateOrderbook);
-  const wsRef = useRef<WebSocket | null>(null);
+import { useEffect, useState } from 'react';
+import { io, Socket } from 'socket.io-client';
+
+interface OrderBookUpdate {
+  u: number;
+  b: [string, string][];
+  a: [string, string][];
+}
+
+let socket: Socket | null = null;
+
+export function useOrderbook() {
+  const [orderbook, setOrderbook] = useState<OrderBookUpdate | null>(null);
 
   useEffect(() => {
-    if (wsRef.current) return;
+    // trigger API once to make sure server initializes
+    fetch('/api/socket_io');
 
-    const url = "wss://stream.binance.com:9443/ws/btcusdt@depth";
-    const ws = new WebSocket(url);
-    wsRef.current = ws;
+    if (!socket) {
+      socket = io('http://localhost:3000', {
+        path: '/api/socket_io',
+        transports: ['websocket'],
+      });
 
-    ws.onopen = () => {
-      console.log("✅ WebSocket connected to:", url);
-    };
+      socket.on('connect', () => {
+        console.log('✅ Connected to Socket.IO server');
+      });
 
-    ws.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        const bids = data.b?.slice(0, 10).map(([p, q]: [string, string]) => [parseFloat(p), parseFloat(q)]);
-        const asks = data.a?.slice(0, 10).map(([p, q]: [string, string]) => [parseFloat(p), parseFloat(q)]);
-        if (bids && asks) updateOrderbook(bids, asks);
-      } catch (err) {
-        console.error("⚠️ Failed to parse WebSocket message:", err);
-      }
-    };
+      socket.on('orderbook', (data: OrderBookUpdate) => {
+        setOrderbook(data);
+      });
 
-    ws.onerror = (event) => {
-      console.error("❌ WebSocket error:", event);
-    };
-
-    ws.onclose = (event) => {
-      console.warn("🔌 WebSocket closed:", event.code, event.reason);
-    };
+      socket.on('connect_error', (err) => {
+        console.error('❌ Socket.IO connection error:', err.message);
+      });
+    }
 
     return () => {
-      ws.close();
-      wsRef.current = null;
+      if (socket) {
+        socket.disconnect();
+        socket = null;
+        console.log('👋 Disconnected from Socket.IO');
+      }
     };
-  }, [updateOrderbook]);
-};
+  }, []);
+
+  return orderbook;
+}
